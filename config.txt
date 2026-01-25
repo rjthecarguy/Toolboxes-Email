@@ -1,0 +1,2 @@
+EMAIL_ADDRESS = "rjrseo@gmail.com"
+APP_PASSWORD = "uapi jeet xyji mpnj"  # Use a Google App Password (recommended)
