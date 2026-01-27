@@ -5,6 +5,10 @@ IMAP (IDLE) -> read NEW messages -> extract actual message body
 -> announce "New Tattletale message" before reading the body
 -> speak via Piper (WAV saved in ./emails_audio next to script)
 -> play via aplay
+
+Deps:
+  pip install imapclient
+  (piper installed and working)
 """
 
 import os
@@ -16,7 +20,6 @@ import re
 from html import unescape
 import email
 import email.header
-import email.message  # <-- FIX: ensure email.message is imported
 from imapclient import IMAPClient
 
 # -------------------------
@@ -38,7 +41,8 @@ EMAIL_AUDIO_DIR = os.path.join(SCRIPT_DIR, "emails_audio")
 # What to announce before the body
 ANNOUNCEMENT = "New Tattletale message."
 
-# Hard cut at the first occurrence of this signature phrase (normalized)
+# 🔥 Hard cut at the first occurrence of this signature phrase.
+# This is your signature/address line (normalized to avoid soft-breaks and =20 issues).
 SIGNATURE_CUTOFF_PHRASES = [
     "6269 Frost Rd, Westerville, OH 43082",
 ]
@@ -113,7 +117,10 @@ def looks_like_header_or_forwarded_junk(line: str) -> bool:
     return False
 
 def strip_known_signature(text: str) -> str:
-    """Hard cut at the first occurrence of any configured signature phrase."""
+    """
+    Hard cut at the first occurrence of any configured signature phrase.
+    Works even if the signature is collapsed into one long line (HTML->text).
+    """
     if not text:
         return ""
 
@@ -143,6 +150,7 @@ def clean_message_text(text: str) -> str:
     text = text.replace("=20", " ")
     text = text.replace("=\n", "")  # quoted-printable soft breaks
 
+    # Remove header-like junk lines
     raw_lines = [ln.rstrip() for ln in text.split("\n")]
     kept = []
     for ln in raw_lines:
@@ -166,10 +174,11 @@ def clean_message_text(text: str) -> str:
         normalized.append(ln)
         last_blank = blank
 
+    # Join to a single speakable string
     out = " ".join([ln.strip() for ln in normalized if ln.strip()])
     out = re.sub(r"\s+", " ", out).strip()
 
-    # Hard cut at signature/address
+    # Hard cut at your fixed signature/address line
     out = strip_known_signature(out)
 
     return out[:MAX_SPEAK_CHARS]
