@@ -25,9 +25,9 @@ import quopri
 # -------------------------
 # CONFIG
 # -------------------------
-EMAIL_ADDRESS = "toolboxes@tiborprotection.org"
-APP_PASSWORD = "Toolboxes123!"
-HOST = "mail.tiborprotection.org"
+EMAIL_ADDRESS = "tibortoolbox@fastmail.com"
+APP_PASSWORD = "2y6n7q63646l379j"
+HOST = "imap.fastmail.com"
 
 PIPER_MODEL = "/home/rj/piper-voices/en_US-amy-medium/en_US-amy-medium.onnx"
 
