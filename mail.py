@@ -18,6 +18,9 @@ import email
 import email.header
 import email.message  # <-- FIX: ensure email.message is imported
 from imapclient import IMAPClient
+from datetime import datetime
+from zoneinfo import ZoneInfo
+import quopri
 
 # -------------------------
 # CONFIG
@@ -36,7 +39,7 @@ SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 EMAIL_AUDIO_DIR = os.path.join(SCRIPT_DIR, "emails_audio")
 
 # What to announce before the body
-ANNOUNCEMENT = "New Tattletale message."
+ANNOUNCEMENT = "New Tattletale message. Sent at"
 
 # Hard cut at the first occurrence of this signature phrase (normalized)
 SIGNATURE_CUTOFF_PHRASES = [
@@ -49,6 +52,18 @@ os.environ.setdefault("ORT_LOG_SEVERITY_LEVEL", "3")
 # -------------------------
 # HELPERS
 # -------------------------
+def set_pcm_volume():
+    try:
+        subprocess.run(
+            ["/usr/bin/amixer", "sset", "PCM", "100%", "unmute"],
+            check=True,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL
+        )
+        print("🔊 PCM volume set to 100%")
+    except Exception as e:
+        print("⚠️ Could not set PCM volume:", e)
+
 def decode_mime_words(s):
     if not s:
         return ""
@@ -68,11 +83,52 @@ def safe_filename(s, max_len=30):
     s = re.sub(r"_+", "_", s).strip("_")
     return (s[:max_len] or "email")
 
+def pacific_timestamp():
+    tz = ZoneInfo("America/Los_Angeles")
+    now = datetime.now(tz)
+    return now.strftime("%B %d, %Y at %I:%M %p Pacific Standard Time")
+
+def extract_embedded_html_from_raw_dump(text: str) -> str:
+    """
+    Some forwards/relays include a raw email dump inside a text/plain body,
+    with quoted-printable HTML like '=3D' sequences. This extracts and decodes
+    the embedded HTML for better TTS output.
+    """
+    if not text:
+        return ""
+
+    low = text.lower()
+    if "<html" not in low and "<!doctype" not in low:
+        return ""
+
+    start = low.find("<!doctype")
+    if start == -1:
+        start = low.find("<html")
+    if start == -1:
+        return ""
+
+    html_blob = text[start:]
+
+    if "=3d" in low or "quoted-printable" in low:
+        try:
+            html_blob = quopri.decodestring(html_blob.encode("utf-8", errors="replace")).decode(
+                "utf-8", errors="replace"
+            )
+        except Exception:
+            pass
+
+    return html_blob
+
 # -------------------------
 # HTML -> TEXT
 # -------------------------
 def html_to_text(html: str) -> str:
     html = unescape(html or "")
+
+    # Remove style/script blocks so CSS doesn't dominate the output
+    html = re.sub(r"(?is)<style[^>]*>.*?</style>", " ", html)
+    html = re.sub(r"(?is)<script[^>]*>.*?</script>", " ", html)
+
     html = re.sub(r"(?i)<br\s*/?>", "\n", html)
     html = re.sub(r"(?i)</p\s*>", "\n", html)
     html = re.sub(r"(?i)</div\s*>", "\n", html)
@@ -89,7 +145,7 @@ JUNK_LINE_PREFIXES = (
     "return-path:", "delivered-to:", "received:", "dkim-signature:",
     "x-", "mime-version:", "content-type:", "content-transfer-encoding:",
     "message-id:", "in-reply-to:", "references:", "date:", "from:", "to:",
-    "sent:", "subject:", "reply-to:", "cc:", "bcc:",
+    "subject:", "reply-to:", "cc:", "bcc:",
     "envelope-to:", "delivery-date:",
 )
 
@@ -227,6 +283,14 @@ def extract_message_text(msg: email.message.Message) -> str:
     plain = "\n".join(plain_parts).strip()
     html = "\n".join(html_parts).strip()
 
+    # Rescue path: sometimes the "plain" part is actually a raw forwarded email dump
+    # containing quoted-printable HTML (e.g., lots of "=3D" sequences).
+    embedded_html = extract_embedded_html_from_raw_dump(plain)
+    if embedded_html:
+        rescued = clean_message_text(html_to_text(embedded_html))
+        if rescued:
+            return rescued
+
     if is_meaningful(plain):
         return clean_message_text(plain)
 
@@ -287,6 +351,7 @@ def main():
     print("📡 Email audio monitor started")
     print(f"📁 Audio directory: {EMAIL_AUDIO_DIR}")
     print("✂️ Signature cutoff phrases:", SIGNATURE_CUTOFF_PHRASES)
+    set_pcm_volume()
 
     server = connect()
     last_seen_uid = get_highest_uid(server)
@@ -317,10 +382,12 @@ def main():
                         print("Body:", (body[:250] + "…") if len(body) > 250 else body)
                         print("-" * 60)
 
+                        sent_time = pacific_timestamp()
+
                         if body:
-                            speak_text = f"{ANNOUNCEMENT} {body}"
+                            speak_text = f"{ANNOUNCEMENT} {sent_time}. {body}"
                         else:
-                            speak_text = f"{ANNOUNCEMENT} Message body was empty."
+                            speak_text = f"{ANNOUNCEMENT} {sent_time}. Message body was empty."
 
                         speak_piper(speak_text, subject=subject, sender=sender)
 
